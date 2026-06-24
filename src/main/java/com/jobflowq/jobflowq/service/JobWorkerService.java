@@ -1,5 +1,7 @@
 package com.jobflowq.jobflowq.service;
 
+import com.jobflowq.jobflowq.dto.JobApplicationEvent;
+import com.jobflowq.jobflowq.kafka.JobEventProducer;
 import com.jobflowq.jobflowq.model.Job;
 import com.jobflowq.jobflowq.model.JobStatus;
 import com.jobflowq.jobflowq.repository.JobRepository;
@@ -19,10 +21,12 @@ public class JobWorkerService {
     private static final Logger logger = LoggerFactory.getLogger(JobWorkerService.class);
 
     private final JobRepository jobRepository;
+    private final JobEventProducer jobEventProducer;
     private final String workerId;
 
-    public JobWorkerService(JobRepository jobRepository) {
+    public JobWorkerService(JobRepository jobRepository, JobEventProducer jobEventProducer) {
         this.jobRepository = jobRepository;
+        this.jobEventProducer = jobEventProducer;
         String envWorkerId = System.getenv("WORKER_ID");
         this.workerId = (envWorkerId != null && !envWorkerId.isBlank()) ? envWorkerId : "worker-1";
     }
@@ -48,6 +52,7 @@ public class JobWorkerService {
         job.setWorkerId(workerId);
         job.setUpdatedAt(LocalDateTime.now());
         jobRepository.save(job);
+        publishStatusUpdate(job);
 
         long startTime = System.currentTimeMillis();
         try {
@@ -57,6 +62,7 @@ public class JobWorkerService {
             job.setCompletedAt(LocalDateTime.now());
             job.setUpdatedAt(LocalDateTime.now());
             jobRepository.save(job);
+            publishStatusUpdate(job);
 
             long timeTaken = System.currentTimeMillis() - startTime;
             logger.info("Job id={} type={} status={} worker={} timeTakenMs={}",
@@ -70,7 +76,7 @@ public class JobWorkerService {
         }
     }
 
-    private void handleFailure(Job job, Exception e) {
+    void handleFailure(Job job, Exception e) {
         int retryCount = job.getRetryCount() + 1;
         job.setRetryCount(retryCount);
         job.setErrorMessage(e.getMessage());
@@ -83,6 +89,17 @@ public class JobWorkerService {
         }
 
         jobRepository.save(job);
+        publishStatusUpdate(job);
+    }
+
+    private void publishStatusUpdate(Job job) {
+        jobEventProducer.publish(new JobApplicationEvent(
+                job.getId(),
+                job.getCompanyName(),
+                job.getStatus(),
+                job.getUpdatedAt(),
+                "STATUS_UPDATED"
+        ));
     }
 
     private void simulateProcessing(String type) throws InterruptedException {
