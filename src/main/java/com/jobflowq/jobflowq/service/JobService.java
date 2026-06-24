@@ -1,8 +1,10 @@
 package com.jobflowq.jobflowq.service;
 
+import com.jobflowq.jobflowq.dto.JobApplicationEvent;
 import com.jobflowq.jobflowq.dto.JobRequest;
 import com.jobflowq.jobflowq.dto.JobResponse;
 import com.jobflowq.jobflowq.dto.QueueMetrics;
+import com.jobflowq.jobflowq.kafka.JobEventProducer;
 import com.jobflowq.jobflowq.model.Job;
 import com.jobflowq.jobflowq.model.JobStatus;
 import com.jobflowq.jobflowq.repository.JobRepository;
@@ -19,15 +21,18 @@ public class JobService {
     private static final Logger logger = LoggerFactory.getLogger(JobService.class);
 
     private final JobRepository jobRepository;
+    private final JobEventProducer jobEventProducer;
 
-    public JobService(JobRepository jobRepository) {
+    public JobService(JobRepository jobRepository, JobEventProducer jobEventProducer) {
         this.jobRepository = jobRepository;
+        this.jobEventProducer = jobEventProducer;
     }
 
     @Transactional
     public JobResponse submitJob(JobRequest request) {
         Job job = new Job();
         job.setType(request.getType());
+        job.setCompanyName(request.getCompanyName());
         job.setPayload(request.getPayload() != null ? request.getPayload() : "{}");
         job.setPriority(request.getPriority() != null ? request.getPriority() : 5);
         job.setMaxRetries(request.getMaxRetries() != null ? request.getMaxRetries() : 3);
@@ -35,6 +40,7 @@ public class JobService {
 
         Job saved = jobRepository.save(job);
         logger.info("Submitted job id={} type={}", saved.getId(), saved.getType());
+        publishEvent(saved, "CREATED");
         return mapToResponse(saved);
     }
 
@@ -67,6 +73,7 @@ public class JobService {
 
         Job saved = jobRepository.save(job);
         logger.info("Cancelled job id={}", saved.getId());
+        publishEvent(saved, "STATUS_UPDATED");
         return mapToResponse(saved);
     }
 
@@ -82,10 +89,21 @@ public class JobService {
         return new QueueMetrics(pending, processing, completed, failed, dead, totalProcessed);
     }
 
+    private void publishEvent(Job job, String eventType) {
+        jobEventProducer.publish(new JobApplicationEvent(
+                job.getId(),
+                job.getCompanyName(),
+                job.getStatus(),
+                job.getUpdatedAt(),
+                eventType
+        ));
+    }
+
     private JobResponse mapToResponse(Job job) {
         JobResponse response = new JobResponse();
         response.setId(job.getId());
         response.setType(job.getType());
+        response.setCompanyName(job.getCompanyName());
         response.setPayload(job.getPayload());
         response.setStatus(job.getStatus());
         response.setPriority(job.getPriority());

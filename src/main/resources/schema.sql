@@ -15,3 +15,5 @@ CREATE TABLE IF NOT EXISTS jobs (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_queue
     ON jobs(status, priority DESC, created_at ASC);
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);

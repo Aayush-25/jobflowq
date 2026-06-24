@@ -7,6 +7,7 @@ public class JobResponse {
 
     private Long id;
     private String type;
+    private String companyName;
     private String payload;
     private JobStatus status;
     private Integer priority;
@@ -23,6 +24,9 @@ public class JobResponse {
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
+
+    public String getCompanyName() { return companyName; }
+    public void setCompanyName(String companyName) { this.companyName = companyName; }
 
     public String getPayload() { return payload; }
     public void setPayload(String payload) { this.payload = payload; }
