@@ -2,6 +2,8 @@
 
 An event-driven distributed job queue built on PostgreSQL and Kafka.
 
+> **GitHub:** https://github.com/Aayush-25/jobflowq
+
 ## Architecture
 
 ```
@@ -10,10 +12,11 @@ An event-driven distributed job queue built on PostgreSQL and Kafka.
                                          │          └──────────────┘
                                          │ (Kafka event: CREATED / STATUS_UPDATED)
                                          ▼
-                                  ┌─────────────┐
-                                  │    Kafka    │
-                                  │ "job-application-events" topic │
-                                  └─────────────┘
+                              ┌───────────────────────┐
+                              │         Kafka         │
+                              │ "job-application-     │
+                              │   events" topic       │
+                              └───────────────────────┘
                                     ▲          │
                                     │          ▼
                           JobWorkerService   JobEventConsumer
@@ -151,15 +154,16 @@ listener that proves the round trip; it has no other side effects.
 
 ## Environment Variables
 
-| Variable | Default (host) | Default (docker-compose) | Description |
-|----------|-----------------|----------------------------|--------------|
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/jobflowq` | `jdbc:postgresql://postgres:5432/jobflowq` | JDBC URL for the Postgres database |
-| `SPRING_DATASOURCE_USERNAME` | `admin` | `admin` | Postgres username |
-| `SPRING_DATASOURCE_PASSWORD` | `password` | `password` | Postgres password |
-| `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | `kafka:29092` | Kafka broker address |
-| `WORKER_ID` | `worker-1` | `worker-1` | Identifies which worker instance processed a job, recorded on the `Job` entity |
+| Variable | Description | Example Value |
+|----------|--------------|----------------|
+| `SPRING_DATASOURCE_URL` | JDBC URL for the Postgres database | `jdbc:postgresql://postgres:5432/jobflowq` |
+| `SPRING_DATASOURCE_USERNAME` | Postgres username | `admin` |
+| `SPRING_DATASOURCE_PASSWORD` | Postgres password | `password` |
+| `SPRING_KAFKA_BOOTSTRAP_SERVERS` | Kafka broker address | `kafka:29092` |
+| `WORKER_ID` | Identifies which worker instance processed a job, recorded on the `Job` entity | `worker-1` |
 
-The docker-compose defaults are set as environment variables on the `app`
-service in `docker-compose.yml` and override `application.properties` via
-Spring Boot's relaxed env-var binding — the properties file itself always
-reflects the host defaults.
+These are set as environment variables on the `app` service in
+`docker-compose.yml` and override `application.properties` via Spring
+Boot's relaxed env-var binding — the properties file itself reflects the
+host defaults (`localhost:5432`/`localhost:9092`) for running outside
+Docker.
