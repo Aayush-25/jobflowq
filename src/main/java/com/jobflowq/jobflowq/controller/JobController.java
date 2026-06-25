@@ -4,6 +4,10 @@ import com.jobflowq.jobflowq.dto.JobRequest;
 import com.jobflowq.jobflowq.dto.JobResponse;
 import com.jobflowq.jobflowq.service.JobService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
@@ -29,6 +33,7 @@ public class JobController {
     }
 
     @Operation(summary = "Submit a new job to the queue")
+    @ApiResponse(responseCode = "201", content = @Content(schema = @Schema(implementation = JobResponse.class)))
     @PostMapping
     public ResponseEntity<?> submitJob(@Valid @RequestBody JobRequest request) {
         try {
@@ -42,6 +47,7 @@ public class JobController {
     }
 
     @Operation(summary = "Retrieve a job by its ID")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JobResponse.class)))
     @GetMapping("/{id}")
     public ResponseEntity<?> getJob(@PathVariable Long id) {
         try {
@@ -55,6 +61,7 @@ public class JobController {
     }
 
     @Operation(summary = "List all jobs in the queue")
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = JobResponse.class))))
     @GetMapping
     public ResponseEntity<?> getAllJobs() {
         try {
@@ -68,6 +75,7 @@ public class JobController {
     }
 
     @Operation(summary = "Cancel a pending job")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JobResponse.class)))
     @DeleteMapping("/{id}")
     public ResponseEntity<?> cancelJob(@PathVariable Long id) {
         try {
