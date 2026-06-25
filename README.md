@@ -1,78 +1,165 @@
 # JobFlowQ
 
-A distributed job queue system built on PostgreSQL, using `SELECT ... FOR UPDATE SKIP LOCKED` for safe concurrent job processing across multiple worker instances.
+An event-driven distributed job queue built on PostgreSQL and Kafka.
 
-## Architecture Overview
+## Architecture
 
-JobFlowQ uses PostgreSQL itself as the queue backend, relying on row-level locking instead of a separate message broker:
+```
+                                                   ┌──────────────┐
+  REST Client ──▶ JobController ──▶ JobService ──▶│  PostgreSQL  │
+                                         │          └──────────────┘
+                                         │ (Kafka event: CREATED / STATUS_UPDATED)
+                                         ▼
+                                  ┌─────────────┐
+                                  │    Kafka    │
+                                  │ "job-application-events" topic │
+                                  └─────────────┘
+                                    ▲          │
+                                    │          ▼
+                          JobWorkerService   JobEventConsumer
+                       (claims, processes,    (logs every
+                        retries, dead-letters  received event)
+                        jobs; publishes its
+                        own STATUS_UPDATED
+                        events on every
+                        transition)
+```
 
-- Jobs are persisted in a single `jobs` table with `status`, `priority`, and `created_at` columns.
-- Each worker polls on a fixed interval (every 500ms) and runs `findNextPendingJob()`, which executes:
-
-  ```sql
-  SELECT * FROM jobs
-  WHERE status = 'PENDING'
-  ORDER BY priority DESC, created_at ASC
-  LIMIT 1
-  FOR UPDATE SKIP LOCKED
-  ```
-
-- `FOR UPDATE` locks the selected row for the duration of the transaction. `SKIP LOCKED` tells Postgres to skip rows already locked by another worker's in-flight transaction rather than blocking on them.
-- This means multiple worker instances can poll the same table concurrently with no double-processing and no explicit distributed lock manager — Postgres' MVCC handles contention.
-- The query runs inside its own transaction (`Propagation.REQUIRES_NEW`), so claiming a job, marking it `PROCESSING`, and committing happens atomically and independently of the outer scheduled task.
-
-## Features
-
-- **Priority queue** — jobs are dequeued by `priority DESC, created_at ASC`, so higher-priority jobs always jump the line, with FIFO ordering within the same priority.
-- **Retry logic** — failed jobs are re-queued as `PENDING` with an incremented `retry_count`, up to a configurable `max_retries` per job.
-- **Dead-letter queue** — jobs that exhaust their retry budget are marked `DEAD` instead of being retried indefinitely or silently dropped.
-- **REST API** — submit, fetch, list, and cancel jobs over HTTP.
-- **Metrics endpoint** — live counts of jobs by status (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `DEAD`).
+`JobService` publishes a `CREATED` event when a job is submitted (and a
+`STATUS_UPDATED` event on cancellation). `JobWorkerService` independently
+publishes `STATUS_UPDATED` events on every transition it drives — claiming
+a job, completing it, retrying it, or dead-lettering it. Both producers
+write to the same `job-application-events` topic; `JobEventConsumer`
+subscribes to it and logs everything it receives.
 
 ## Tech Stack
 
-- Java 17
-- Spring Boot 3.5.15 (Web, Data JPA, Validation)
-- PostgreSQL 15
-- Docker / Docker Compose
-- Maven
+![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5.15-brightgreen)
+![Kafka](https://img.shields.io/badge/Kafka-3.7-black)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED)
+![Java](https://img.shields.io/badge/Java-17-orange)
 
-## Getting Started
+## Features
 
-**Prerequisites:** Docker, Java 17, Maven wrapper (bundled).
+- **Priority queue on Postgres** — workers dequeue jobs with `SELECT ...
+  FOR UPDATE SKIP LOCKED`, ordered by `priority DESC, created_at ASC`, so
+  multiple worker instances can poll the same table concurrently with no
+  double-processing and no external lock manager.
+- **Event-driven** — every job creation, cancellation, and worker-driven
+  status transition publishes a `JobApplicationEvent` to Kafka.
+- **Kafka in KRaft mode** — no Zookeeper; a single-node broker handles
+  both controller and broker roles.
+- **Swagger UI** — interactive API docs and a browsable OpenAPI schema,
+  no extra setup required.
+- **Retry + dead-letter handling** — failed jobs are retried up to
+  `maxRetries` times; once exhausted, they're marked `DEAD` instead of
+  being retried forever or silently dropped.
 
-1. Start PostgreSQL:
+## How to Run Locally
 
-   ```bash
-   docker compose up -d
-   ```
+**Prerequisites:** Docker, Docker Compose.
 
-2. Run the application (schema is created automatically from `schema.sql` on startup):
+Bring up the full stack — Postgres, Kafka, and the app — in one command:
 
-   ```bash
-   ./mvnw spring-boot:run
-   ```
+```bash
+docker-compose up --build
+```
 
-The API will be available at `http://localhost:8080`.
+This builds the app image, waits for Postgres and Kafka to report
+healthy, then starts the app. The API is available at
+`http://localhost:8080` once `jobflowq-app` is up.
 
-## API Endpoints
-
-| Method | Path              | Description                                  |
-|--------|--------------------|-----------------------------------------------|
-| POST   | `/api/jobs`         | Submit a new job to the queue                |
-| GET    | `/api/jobs/{id}`    | Fetch a single job by ID                     |
-| GET    | `/api/jobs`         | List all jobs                                |
-| DELETE | `/api/jobs/{id}`    | Cancel a `PENDING` job                       |
-| GET    | `/api/metrics`      | Get queue metrics (counts by status)         |
-
-**Example: submit a job**
+**Submit a job:**
 
 ```bash
 curl -X POST http://localhost:8080/api/jobs \
   -H "Content-Type: application/json" \
-  -d '{"type": "EMAIL", "payload": "{\"to\":\"user@example.com\"}", "priority": 10, "maxRetries": 3}'
+  -d '{"type": "EMAIL", "companyName": "Acme Corp", "payload": "{\"to\":\"user@example.com\"}", "priority": 10, "maxRetries": 3}'
 ```
 
-## How It Works
+**Fetch a job:**
 
-A scheduled task fires every 500ms on each worker and attempts to claim the highest-priority `PENDING` job via the `SKIP LOCKED` query, immediately marking it `PROCESSING` and tagging it with the worker's ID. The job's work is then executed; on success it transitions to `COMPLETED` with a `completed_at` timestamp, and on failure its `retry_count` is incremented and it returns to `PENDING` for another attempt. Once `retry_count` reaches `max_retries`, the job is moved to `DEAD` instead of being retried again, acting as a dead-letter queue. Because claiming, status updates, and retries all happen through ordinary SQL transactions against the same table, the system requires no external broker — Postgres provides both the durable store and the concurrency control.
+```bash
+curl http://localhost:8080/api/jobs/1
+```
+
+**List all jobs:**
+
+```bash
+curl http://localhost:8080/api/jobs
+```
+
+**Cancel a pending job:**
+
+```bash
+curl -X DELETE http://localhost:8080/api/jobs/1
+```
+
+**Check queue metrics:**
+
+```bash
+curl http://localhost:8080/api/metrics
+```
+
+**Browse the API interactively:** open `http://localhost:8080/swagger-ui.html`.
+
+> Running the app on the host instead (`./mvnw spring-boot:run`) still
+> works unchanged — just start the infra first with `docker-compose up -d
+> postgres kafka`, since `application.properties` defaults to
+> `localhost:5432`/`localhost:9092`.
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/jobs` | Submit a new job to the queue |
+| GET | `/api/jobs/{id}` | Retrieve a job by its ID |
+| GET | `/api/jobs` | List all jobs in the queue |
+| DELETE | `/api/jobs/{id}` | Cancel a pending job |
+| GET | `/api/metrics` | Retrieve aggregate queue metrics |
+
+## Kafka Event Flow
+
+Every job lifecycle change publishes a `JobApplicationEvent` to the
+`job-application-events` topic:
+
+```java
+record JobApplicationEvent(
+    Long applicationId,   // the job's id
+    String companyName,   // optional, set at submission
+    JobStatus status,      // the job's status at publish time
+    LocalDateTime updatedAt,
+    String eventType       // "CREATED" or "STATUS_UPDATED"
+)
+```
+
+| Event | `eventType` | Fired by | When |
+|---|---|---|---|
+| Job created | `CREATED` | `JobService` | Once, when a job is submitted |
+| Job cancelled | `STATUS_UPDATED` | `JobService` | When a pending job is cancelled (→ `FAILED`) |
+| Job claimed | `STATUS_UPDATED` | `JobWorkerService` | When a worker picks up a pending job (→ `PROCESSING`) |
+| Job completed | `STATUS_UPDATED` | `JobWorkerService` | On successful processing (→ `COMPLETED`) |
+| Job retried | `STATUS_UPDATED` | `JobWorkerService` | On failure, below the retry limit (→ `PENDING`) |
+| Job dead-lettered | `STATUS_UPDATED` | `JobWorkerService` | On failure, retry limit exhausted (→ `DEAD`) |
+
+The message key is the job's id (as a string), so all events for the same
+job land on the same partition and are consumed in order. Publishing is
+best-effort: a Kafka outage is logged but never blocks a job from being
+created, processed, or cancelled. `JobEventConsumer` is a simple logging
+listener that proves the round trip; it has no other side effects.
+
+## Environment Variables
+
+| Variable | Default (host) | Default (docker-compose) | Description |
+|----------|-----------------|----------------------------|--------------|
+| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/jobflowq` | `jdbc:postgresql://postgres:5432/jobflowq` | JDBC URL for the Postgres database |
+| `SPRING_DATASOURCE_USERNAME` | `admin` | `admin` | Postgres username |
+| `SPRING_DATASOURCE_PASSWORD` | `password` | `password` | Postgres password |
+| `SPRING_KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | `kafka:29092` | Kafka broker address |
+| `WORKER_ID` | `worker-1` | `worker-1` | Identifies which worker instance processed a job, recorded on the `Job` entity |
+
+The docker-compose defaults are set as environment variables on the `app`
+service in `docker-compose.yml` and override `application.properties` via
+Spring Boot's relaxed env-var binding — the properties file itself always
+reflects the host defaults.
