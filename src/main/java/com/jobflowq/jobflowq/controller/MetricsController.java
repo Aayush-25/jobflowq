@@ -2,6 +2,8 @@ package com.jobflowq.jobflowq.controller;
 
 import com.jobflowq.jobflowq.dto.QueueMetrics;
 import com.jobflowq.jobflowq.service.JobService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -14,6 +16,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/metrics")
+@Tag(name = "Metrics", description = "Queue-wide job metrics")
 public class MetricsController {
 
     private static final Logger logger = LoggerFactory.getLogger(MetricsController.class);
@@ -24,6 +27,7 @@ public class MetricsController {
         this.jobService = jobService;
     }
 
+    @Operation(summary = "Retrieve aggregate queue metrics")
     @GetMapping
     public ResponseEntity<?> getMetrics() {
         try {

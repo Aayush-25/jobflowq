@@ -3,6 +3,8 @@ package com.jobflowq.jobflowq.controller;
 import com.jobflowq.jobflowq.dto.JobRequest;
 import com.jobflowq.jobflowq.dto.JobResponse;
 import com.jobflowq.jobflowq.service.JobService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +17,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/jobs")
+@Tag(name = "Jobs", description = "Job submission, retrieval, and lifecycle management")
 public class JobController {
 
     private static final Logger logger = LoggerFactory.getLogger(JobController.class);
@@ -25,6 +28,7 @@ public class JobController {
         this.jobService = jobService;
     }
 
+    @Operation(summary = "Submit a new job to the queue")
     @PostMapping
     public ResponseEntity<?> submitJob(@Valid @RequestBody JobRequest request) {
         try {
@@ -37,6 +41,7 @@ public class JobController {
         }
     }
 
+    @Operation(summary = "Retrieve a job by its ID")
     @GetMapping("/{id}")
     public ResponseEntity<?> getJob(@PathVariable Long id) {
         try {
@@ -49,6 +54,7 @@ public class JobController {
         }
     }
 
+    @Operation(summary = "List all jobs in the queue")
     @GetMapping
     public ResponseEntity<?> getAllJobs() {
         try {
@@ -61,6 +67,7 @@ public class JobController {
         }
     }
 
+    @Operation(summary = "Cancel a pending job")
     @DeleteMapping("/{id}")
     public ResponseEntity<?> cancelJob(@PathVariable Long id) {
         try {
