@@ -1,22 +1,48 @@
 package com.jobflowq.jobflowq.dto;
 
 import com.jobflowq.jobflowq.model.JobStatus;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 
 public class JobResponse {
 
+    @Schema(description = "Unique identifier of the job")
     private Long id;
+
+    @Schema(description = "Job type identifier (e.g. EMAIL, REPORT, EXPORT)")
     private String type;
+
+    @Schema(description = "Company name associated with this job, if provided")
     private String companyName;
+
+    @Schema(description = "Arbitrary JSON payload for the job")
     private String payload;
+
+    @Schema(description = "Current lifecycle status of the job")
     private JobStatus status;
+
+    @Schema(description = "Job priority; higher values are processed first")
     private Integer priority;
+
+    @Schema(description = "Number of times this job has been retried after failure")
     private Integer retryCount;
+
+    @Schema(description = "Maximum number of retry attempts before the job is dead-lettered")
     private Integer maxRetries;
+
+    @Schema(description = "Identifier of the worker currently or last processing this job")
     private String workerId;
+
+    @Schema(description = "Error message from the most recent failed processing attempt, if any")
     private String errorMessage;
+
+    @Schema(description = "Timestamp when the job was created")
     private LocalDateTime createdAt;
+
+    @Schema(description = "Timestamp when the job was last updated")
     private LocalDateTime updatedAt;
+
+    @Schema(description = "Timestamp when the job completed successfully, if applicable")
     private LocalDateTime completedAt;
 
     public Long getId() { return id; }
