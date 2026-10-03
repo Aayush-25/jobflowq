@@ -1,6 +1,8 @@
 # JobFlowQ
 
-An event-driven distributed job queue built on PostgreSQL and Kafka.
+A Java / Spring Boot learning project for PostgreSQL-backed job processing, retries, and Kafka lifecycle events.
+
+Job execution currently simulates work with timed delays; it does not send emails or generate reports. PostgreSQL is the queue, while Kafka records state-change events.
 
 > **GitHub:** https://github.com/Aayush-25/jobflowq
 
@@ -46,27 +48,33 @@ subscribes to it and logs everything it receives.
 ## Features
 
 - **Priority queue on Postgres** — workers dequeue jobs with `SELECT ...
-  FOR UPDATE SKIP LOCKED`, ordered by `priority DESC, created_at ASC`, so
-  multiple worker instances can poll the same table concurrently with no
-  double-processing and no external lock manager.
+  FOR UPDATE SKIP LOCKED`, ordered by `priority DESC, created_at ASC`, to express non-blocking row selection. Correct multi-worker behavior depends on the transaction boundary and must be validated with integration tests; this is not an exactly-once guarantee.
 - **Event-driven** — every job creation, cancellation, and worker-driven
   status transition publishes a `JobApplicationEvent` to Kafka.
 - **Kafka in KRaft mode** — no Zookeeper; a single-node broker handles
   both controller and broker roles.
 - **Swagger UI** — interactive API docs and a browsable OpenAPI schema,
   no extra setup required.
-- **Retry + dead-letter handling** — failed jobs are retried up to
-  `maxRetries` times; once exhausted, they're marked `DEAD` instead of
+- **Retry + dead-letter handling** — failed jobs return to pending until
+  the failure count reaches `maxRetries`; at that threshold, they're marked `DEAD` instead of
   being retried forever or silently dropped.
 
 ## How to Run Locally
 
-**Prerequisites:** Docker, Docker Compose.
+**Prerequisites:** Docker with Compose. For host-side tests, use Java 17+ and the included Maven wrapper.
+
+```bash
+git clone https://github.com/Aayush-25/jobflowq.git
+cd jobflowq
+cp .env.example .env
+```
+
+Edit `.env` before starting: set `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`, then give `SPRING_DATASOURCE_USERNAME` and `SPRING_DATASOURCE_PASSWORD` the same user/password values. The example file contains placeholders.
 
 Bring up the full stack — Postgres, Kafka, and the app — in one command:
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 This builds the app image, waits for Postgres and Kafka to report
@@ -107,10 +115,11 @@ curl http://localhost:8080/api/metrics
 
 **Browse the API interactively:** open `http://localhost:8080/swagger-ui.html`.
 
-> Running the app on the host instead (`./mvnw spring-boot:run`) still
-> works unchanged — just start the infra first with `docker-compose up -d
-> postgres kafka`, since `application.properties` defaults to
-> `localhost:5432`/`localhost:9092`.
+### Running on the host
+
+Start only the infrastructure with `docker compose up -d postgres kafka`. Export `SPRING_DATASOURCE_URL` (using `localhost:5432` and your database name), `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` to match `.env`, then run `sh ./mvnw spring-boot:run`. Spring Boot does not automatically load the Compose `.env` file.
+
+The defaults in `application.properties` are local-development examples; do not assume they match the credentials you chose.
 
 ## API Endpoints
 
@@ -167,3 +176,23 @@ These are set as environment variables on the `app` service in
 Boot's relaxed env-var binding — the properties file itself reflects the
 host defaults (`localhost:5432`/`localhost:9092`) for running outside
 Docker.
+
+## Tests
+
+The isolated service and Kafka unit tests use mocks and do not need running infrastructure:
+
+```bash
+sh ./mvnw -B '-Dtest=JobServiceTest,JobWorkerServiceTest,JobEventProducerTest,JobEventConsumerTest' test
+```
+
+The complete `sh ./mvnw test` command also runs `JobflowqApplicationTests`, which loads the Spring application context. Configure the database and start PostgreSQL/Kafka before running it. Unit tests do not prove concurrent job claiming or Kafka delivery against real services.
+
+## Current limitations and next steps
+
+- Processing is simulated with `Thread.sleep`; application-specific job handlers are not implemented.
+- `processNextJob()` is annotated as transactional but is called from the same service by the scheduler. Spring proxy transactions do not apply to self-invocation; verify and correct the transaction boundary before relying on row locks across multiple workers. See the [Spring transaction documentation](https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative/annotations.html).
+- Kafka publishing is best-effort, without a transactional outbox; database state and event publication can diverge.
+- `maxRetries` acts as a failure threshold: reaching it marks the job `DEAD`. There is no retry backoff or automatic recovery of abandoned `PROCESSING` jobs.
+- Authentication, public-service hardening, and load/concurrency testing remain future work.
+
+These are useful next engineering exercises: prove the locking behavior with a real PostgreSQL test, add crash recovery, and replace simulated work with one real handler.
